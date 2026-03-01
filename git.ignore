@@ -1,0 +1,17 @@
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+#Test binary, buiilt with go test -c
+*.test
+
+*.out
+coverage.*
+*.coverprofile
+
+go.work
+go.work.sum
+
+.env
