@@ -5,6 +5,8 @@ import (
 	"io"
 	"testing"
 
+	"http-server/internal/headers"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -73,9 +75,9 @@ func TestRequestLineParse(t *testing.T) {
 	}
 	_, err = RequestFromReader(testChunkReader)
 	require.Error(t, err)
+	require.ErrorIs(t, err, ErrorMalformedRequestLine)
 
-	// TODO: add more edge cases tests that you can think of
-	// Good POST RequestLine, TODO: probably add body
+	// Good POST RequestLine
 	testChunkReader = &chunkReader{
 		data:                 "POST /pizza HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/8.5\r\nAccept: */*\r\n\r\n",
 		numberOfBytesPerRead: 80,
@@ -94,6 +96,7 @@ func TestRequestLineParse(t *testing.T) {
 	}
 	reader, err = RequestFromReader(testChunkReader)
 	require.Error(t, err)
+	require.ErrorIs(t, err, ErrorMalformedRequestLine)
 
 	// Invalid method (out of order) RequestLine
 	testChunkReader = &chunkReader{
@@ -102,6 +105,7 @@ func TestRequestLineParse(t *testing.T) {
 	}
 	reader, err = RequestFromReader(testChunkReader)
 	require.Error(t, err)
+	require.ErrorIs(t, err, ErrorMalformedRequestLine)
 
 	// Invalid version in RequestLine
 	testChunkReader = &chunkReader{
@@ -110,12 +114,58 @@ func TestRequestLineParse(t *testing.T) {
 	}
 	reader, err = RequestFromReader(testChunkReader)
 	require.Error(t, err)
+	require.ErrorIs(t, err, ErrorMalformedRequestLine)
 
 	// Method not capital letters error
 	testChunkReader = &chunkReader{
-		data:                 "post /pizza HTTP/3\r\nHost: localhost:42069\r\nUser-Agent: curl/8.5\r\nAccept: */*\r\n\r\n",
+		data:                 "post /pizza HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/8.5\r\nAccept: */*\r\n\r\n",
 		numberOfBytesPerRead: 7000,
 	}
 	reader, err = RequestFromReader(testChunkReader)
 	require.Error(t, err)
+	require.ErrorIs(t, err, ErrorMethodNotCapitalLetters)
+}
+
+func TestRequestHeaders(t *testing.T) {
+	// Test : standard headers
+	testChunkReader := &chunkReader{
+		data:                 "GET / HTTP/1.1\r\nHost: localhost:42069\r\nUser-Agent: curl/8.5\r\nAccept: */*\r\n\r\n",
+		numberOfBytesPerRead: 10000,
+	}
+	reader, err := RequestFromReader(testChunkReader)
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+	assert.Equal(t, "localhost:42069", reader.Headers.Get("host"))
+	assert.Equal(t, "curl/8.5", reader.Headers.Get("user-agent"))
+	assert.Equal(t, "*/*", reader.Headers.Get("accept"))
+
+	// Test : malformed header
+	testChunkReader = &chunkReader{
+		data:                 "GET / HTTP/1.1\r\nHost : localhost:42069\r\nUser-Agent: curl/8.5\r\nAccept: */*\r\n\r\n",
+		numberOfBytesPerRead: 1,
+	}
+	reader, err = RequestFromReader(testChunkReader)
+	require.Error(t, err)
+	require.ErrorIs(t, err, headers.ErrorWhitespaceBetweenColonAndKey)
+
+	// Test : duplicate headers
+	testChunkReader = &chunkReader{
+		data:                 "GET / HTTP/1.1\r\n       host:       localhost:42069      \r\n accept: video/*\r\n accept: video/*\r\n\r\n",
+		numberOfBytesPerRead: 1,
+	}
+	reader, err = RequestFromReader(testChunkReader)
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+	assert.Equal(t, "localhost:42069", reader.Headers.Get("host"))
+	assert.Equal(t, "video/*, video/*", reader.Headers.Get("accept"))
+
+	// Test : empty headers
+	testChunkReader = &chunkReader{
+		data:                 "GET / HTTP/1.1\r\n\r\n",
+		numberOfBytesPerRead: 1,
+	}
+	reader, err = RequestFromReader(testChunkReader)
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+	// assert.Equal(t, 0, len(reader.Headers))
 }

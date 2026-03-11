@@ -5,14 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"http-server/internal/headers"
 )
 
 type parserState string
 
 const (
-	StateInitialized parserState = "init"
-	StateDone        parserState = "done"
-	StateError       parserState = "error"
+	StateInitialized    parserState = "init"
+	StateDone           parserState = "done"
+	StateError          parserState = "error"
+	StateParsingHeaders parserState = "parsingHeaders"
 )
 
 var (
@@ -32,16 +35,14 @@ type RequestLine struct {
 
 type HttpRequest struct {
 	RequestLine RequestLine
+	Headers     *headers.Headers
 	state       parserState
-}
-
-func (requestLine *RequestLine) ValidHTTPVersion() bool {
-	return requestLine.HttpVersion == "HTTP/1.1"
 }
 
 func newHttpRequest() *HttpRequest {
 	return &HttpRequest{
-		state: StateInitialized,
+		state:   StateInitialized,
+		Headers: headers.NewHeaders(),
 	}
 }
 
@@ -49,7 +50,7 @@ func newHttpRequest() *HttpRequest {
 func RequestFromReader(reader io.Reader) (*HttpRequest, error) {
 	httpRequest := newHttpRequest()
 
-	// NOTE: buffer could get overrun, anything exceeding 1k - the header or the body for instance
+	// NOTE: buffer could get overrun, anything exceeding 4k - the header or the body for instance
 	buffer := make([]byte, 4096)
 	bufferLength := 0
 
@@ -82,12 +83,31 @@ func (httpRequest *HttpRequest) parse(data []byte) (int, error) {
 	// this outer thing is labeling - its one way of returning from a deeply nested item... labeling things usually is eh ?
 outer:
 	for {
+
+		currentData := data[read:]
+
 		switch httpRequest.state {
 		case StateError:
 			return 0, ErrorHttpRequestInErrorState
 
+		case StateParsingHeaders:
+			numberOfBytesProcessed, done, err := httpRequest.Headers.Parse(currentData)
+			if err != nil {
+				return 0, err
+			}
+
+			if numberOfBytesProcessed == 0 { // it returns the already read data this way, dont return 0, nil or something like that
+				break outer
+			}
+
+			read += numberOfBytesProcessed
+
+			if done {
+				httpRequest.state = StateDone
+			}
+
 		case StateInitialized:
-			requestLine, numberOfBytesProcessed, err := parseRequestLine(data[read:])
+			requestLine, numberOfBytesProcessed, err := parseRequestLine(currentData)
 			if err != nil {
 				httpRequest.state = StateError
 				return 0, err
@@ -100,10 +120,13 @@ outer:
 			httpRequest.RequestLine = *requestLine
 			read += numberOfBytesProcessed
 
-			httpRequest.state = StateDone // TODO: figure out why this makes sense
+			httpRequest.state = StateParsingHeaders // this works because it keeps parsing bytes for the request line untill it gets to the first \r\n
 
 		case StateDone:
 			break outer
+
+		default:
+			panic("Somehow we got to a non-supported state while parsing the http request!")
 		}
 	}
 
