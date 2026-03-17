@@ -1,7 +1,6 @@
 package request
 
 import (
-	"fmt"
 	"io"
 	"testing"
 
@@ -19,9 +18,9 @@ type chunkReader struct {
 
 // Read reads up to len(p) or numberOfBytesPerRead bytes from the string, useful for simulating reading a variable number of bytes per chunk
 func (chunkReader *chunkReader) Read(data []byte) (n int, err error) {
-	// TODO: this is one way of handling the small (i.e. 3) buffer size in RequestFromReader, see what to do with this.
+	// this is one way of handling the small (i.e. 3) buffer size in RequestFromReader
 	if len(data) == 0 {
-		return 0, fmt.Errorf("The length of sent data is 0!")
+		return 0, nil
 	}
 
 	if chunkReader.position >= len(chunkReader.data) {
@@ -135,14 +134,20 @@ func TestRequestHeaders(t *testing.T) {
 	reader, err := RequestFromReader(testChunkReader)
 	require.NoError(t, err)
 	require.NotNil(t, reader)
-	assert.Equal(t, "localhost:42069", reader.Headers.Get("host"))
-	assert.Equal(t, "curl/8.5", reader.Headers.Get("user-agent"))
-	assert.Equal(t, "*/*", reader.Headers.Get("accept"))
+	host, ok := reader.Headers.Get("host")
+	assert.True(t, ok)
+	assert.Equal(t, "localhost:42069", host)
+	userAgent, ok := reader.Headers.Get("user-agent")
+	assert.True(t, ok)
+	assert.Equal(t, "curl/8.5", userAgent)
+	accept, ok := reader.Headers.Get("accept")
+	assert.True(t, ok)
+	assert.Equal(t, "*/*", accept)
 
 	// Test : malformed header
 	testChunkReader = &chunkReader{
 		data:                 "GET / HTTP/1.1\r\nHost : localhost:42069\r\nUser-Agent: curl/8.5\r\nAccept: */*\r\n\r\n",
-		numberOfBytesPerRead: 1,
+		numberOfBytesPerRead: 42,
 	}
 	reader, err = RequestFromReader(testChunkReader)
 	require.Error(t, err)
@@ -151,21 +156,64 @@ func TestRequestHeaders(t *testing.T) {
 	// Test : duplicate headers
 	testChunkReader = &chunkReader{
 		data:                 "GET / HTTP/1.1\r\n       host:       localhost:42069      \r\n accept: video/*\r\n accept: video/*\r\n\r\n",
-		numberOfBytesPerRead: 1,
+		numberOfBytesPerRead: 7000,
 	}
 	reader, err = RequestFromReader(testChunkReader)
 	require.NoError(t, err)
 	require.NotNil(t, reader)
-	assert.Equal(t, "localhost:42069", reader.Headers.Get("host"))
-	assert.Equal(t, "video/*, video/*", reader.Headers.Get("accept"))
+	host, ok = reader.Headers.Get("host")
+	assert.True(t, ok)
+	assert.Equal(t, "localhost:42069", host)
+	accept, ok = reader.Headers.Get("accept")
+	assert.True(t, ok)
+	assert.Equal(t, "video/*, video/*", accept)
 
 	// Test : empty headers
 	testChunkReader = &chunkReader{
 		data:                 "GET / HTTP/1.1\r\n\r\n",
-		numberOfBytesPerRead: 1,
+		numberOfBytesPerRead: 13,
 	}
 	reader, err = RequestFromReader(testChunkReader)
 	require.NoError(t, err)
 	require.NotNil(t, reader)
-	// assert.Equal(t, 0, len(reader.Headers))
+}
+
+func TestRequestBody(t *testing.T) {
+	// Test: standard body
+	testChunkReader := &chunkReader{
+		data:                 "POST /requestPizza HTTP/1.1\r\nHost: localhost:42069\r\nContent-Length: 13\r\n\r\nhello world!\n",
+		numberOfBytesPerRead: 10000000000,
+	}
+	reader, err := RequestFromReader(testChunkReader)
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+	assert.Equal(t, "hello world!\n", string(reader.Body))
+
+	// Test: Body shorter than sent Content-Length
+	testChunkReader = &chunkReader{
+		data:                 "POST /requestPizza HTTP/1.1\r\nHost: localhost:42069\r\nContent-Length: 15\r\n\r\nhello world!\n",
+		numberOfBytesPerRead: 10000000000,
+	}
+	reader, err = RequestFromReader(testChunkReader)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrorHttpBodyNotEqualToContentLength)
+
+	// Test: no content-length but body exists -> shouldnt error
+	testChunkReader = &chunkReader{
+		data:                 "POST /requestPizza HTTP/1.1\r\nHost: localhost:42069\r\n\r\nHELLO WORLD!\n",
+		numberOfBytesPerRead: 10000000000,
+	}
+	reader, err = RequestFromReader(testChunkReader)
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+	assert.Equal(t, "", string(reader.Body))
+
+	// Test: empty body, 0 content-length
+	testChunkReader = &chunkReader{
+		data:                 "POST /requestPizza HTTP/1.1\r\nHost: localhost:42069\r\nContent-Length: 0\r\n\r\n\n",
+		numberOfBytesPerRead: 10000000000,
+	}
+	require.NoError(t, err)
+	require.NotNil(t, reader)
+	assert.Equal(t, "", string(reader.Body))
 }

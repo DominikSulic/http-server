@@ -24,8 +24,9 @@ func NewHeaders() *Headers {
 	return &Headers{headers: make(map[string]string)}
 }
 
-func (headers *Headers) Get(name string) string {
-	return headers.headers[strings.ToLower(name)]
+func (headers *Headers) Get(name string) (string, bool) {
+	string, ok := headers.headers[strings.ToLower(name)]
+	return string, ok
 }
 
 func (headers *Headers) Set(name string, value string) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 
 	"http-server/internal/headers"
 )
@@ -16,13 +17,15 @@ const (
 	StateDone           parserState = "done"
 	StateError          parserState = "error"
 	StateParsingHeaders parserState = "parsingHeaders"
+	StateParsingBody    parserState = "parsingBody"
 )
 
 var (
-	ErrorMalformedRequestLine    = fmt.Errorf("Malformed request-line!")
-	ErrorMethodNotCapitalLetters = fmt.Errorf("Request method is not written using only capital letters!")
-	ErrorHttpRequestInErrorState = fmt.Errorf("Request is in error state!")
-	Separator                    = []byte("\r\n")
+	ErrorMalformedRequestLine            = fmt.Errorf("Malformed request-line!")
+	ErrorMethodNotCapitalLetters         = fmt.Errorf("Request method is not written using only capital letters!")
+	ErrorHttpRequestInErrorState         = fmt.Errorf("Request is in error state!")
+	ErrorHttpBodyNotEqualToContentLength = fmt.Errorf("Request body is not the same length as is specified in the content-length header!")
+	Separator                            = []byte("\r\n")
 )
 
 // if its a request, not a response, the start line is referred to as the "request-line" and has a specific format.
@@ -36,13 +39,30 @@ type RequestLine struct {
 type HttpRequest struct {
 	RequestLine RequestLine
 	Headers     *headers.Headers
+	Body        []byte
 	state       parserState
+}
+
+func getIntValue(headers *headers.Headers, name string, defaultValue int) int {
+	stringValue, exists := headers.Get(name)
+
+	if !exists {
+		return defaultValue
+	}
+
+	intValue, err := strconv.Atoi(stringValue)
+	if err != nil {
+		return defaultValue
+	}
+
+	return intValue
 }
 
 func newHttpRequest() *HttpRequest {
 	return &HttpRequest{
 		state:   StateInitialized,
 		Headers: headers.NewHeaders(),
+		Body:    make([]byte, 0),
 	}
 }
 
@@ -76,6 +96,14 @@ func RequestFromReader(reader io.Reader) (*HttpRequest, error) {
 	return httpRequest, nil
 }
 
+func (httpRequest *HttpRequest) hasBody() bool {
+	// TODO: when doing chunked encoding, update this method.
+	contentLength := getIntValue(httpRequest.Headers, "content-length", 0)
+	return contentLength > 0
+}
+
+// Going to assume that if there is no Content-Length header, there is no body present. RFC 9110 says that a user agent SHOULD send Content-Length in a request...
+// This might not apply to all the cases out in the wild...
 func (httpRequest *HttpRequest) parse(data []byte) (int, error) {
 	read := 0
 
@@ -93,6 +121,7 @@ outer:
 		case StateParsingHeaders:
 			numberOfBytesProcessed, done, err := httpRequest.Headers.Parse(currentData)
 			if err != nil {
+				httpRequest.state = StateError
 				return 0, err
 			}
 
@@ -102,7 +131,30 @@ outer:
 
 			read += numberOfBytesProcessed
 
+			// in the real world you wouldnt get an EOF after reading data -> you could nicely transition to the body, which would
+			// allow you to transition to done
 			if done {
+				if httpRequest.hasBody() {
+					httpRequest.state = StateParsingBody
+				} else {
+					httpRequest.state = StateDone
+				}
+			}
+
+		case StateParsingBody:
+
+			contentLength := getIntValue(httpRequest.Headers, "content-length", 0)
+
+			remainingForParsing := min(contentLength-len(httpRequest.Body), len(currentData)) // added cause of contentLength potentially being greater than the body length
+
+			httpRequest.Body = append(httpRequest.Body, currentData[:remainingForParsing]...) // []T... is used  to pass the unchanged argument value for the T parameter
+
+			read += remainingForParsing
+
+			if len(data) == read {
+				if contentLength != len(httpRequest.Body) {
+					return 0, ErrorHttpBodyNotEqualToContentLength
+				}
 				httpRequest.state = StateDone
 			}
 
@@ -126,7 +178,7 @@ outer:
 			break outer
 
 		default:
-			panic("Somehow we got to a non-supported state while parsing the http request!")
+			panic("Got to a non-supported state while parsing the http request!")
 		}
 	}
 

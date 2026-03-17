@@ -14,6 +14,7 @@ import (
  * curl http://localhost:42069/pizza
  * curl -X POST http://localhost:42069/pizza -H "Content-Type: application/json" -d '{"flavor":"dark mode"}'
  * go run ./cmd/tcplistener | tee /tmp/requestline.txt
+ * curl -X POST http://localhost:42069/pizza -H 'Content-Type: application/json' -d '{"type": "dark mode", "size": "medium"}'
  */
 func main() {
 	// listen on TCP port 42069 on all IP addresses of the local system
@@ -43,5 +44,8 @@ func main() {
 		httpRequest.Headers.ForEach(func(key, value string) {
 			fmt.Printf("- %s: %s\n", key, value)
 		})
+
+		fmt.Printf("Body:\n")
+		fmt.Printf("%s\n", string(httpRequest.Body))
 	}
 }
