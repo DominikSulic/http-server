@@ -151,6 +151,7 @@ outer:
 
 			read += remainingForParsing
 
+			// if the length of sent data equals the number of read bytes we're done, but do check for the content length and body length being different!
 			if len(data) == read {
 				if contentLength != len(httpRequest.Body) {
 					return 0, ErrorHttpBodyNotEqualToContentLength
