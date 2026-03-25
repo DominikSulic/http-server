@@ -1,18 +1,21 @@
 package main
 
 import (
+	"io"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"http-server/internal/httpserver"
+	"http-server/internal/request"
+	"http-server/internal/response"
 )
 
 const port = 42069
 
 func main() {
-	server, err := httpserver.Start(port)
+	server, err := httpserver.Start(port, responseHandler)
 	if err != nil {
 		log.Fatalf("Error starting server: %v", err)
 	}
@@ -26,4 +29,17 @@ func main() {
 	signal.Notify(signalChannel, syscall.SIGINT, syscall.SIGTERM)
 	<-signalChannel
 	log.Println("Server gracefully stopped")
+}
+
+func responseHandler(writer io.Writer, request *request.HttpRequest) *httpserver.HandlerError {
+	if request.RequestLine.RequestTarget == "/badrequest" {
+		return &httpserver.HandlerError{StatusCode: response.StatusBadRequest, Message: "Bad request\n"}
+	}
+
+	if request.RequestLine.RequestTarget == "/internalerror" {
+		return &httpserver.HandlerError{StatusCode: response.StatusInternalServerError, Message: "Internal error\n"}
+	}
+
+	writer.Write([]byte("All good\n"))
+	return nil
 }

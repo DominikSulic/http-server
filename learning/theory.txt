@@ -1,0 +1,107 @@
+Transmission Control Protocol (TCP) is a primary communication protocol of the internet, though that's changing with HTTP3 (not built on TCP) gaining popularity.
+
+TCP allows ordered data to be safely sent across the internet. Data being sent over the network is sent in packets - each message is split into packets, the packets are sent, they arrive (potentially) in a different sequence, and they are reassembled on the other side. So TCP would solve the issue - i.e. "123" could arrive as "213" but cause of the reassembly it doesn't matter.
+
+If you send 8 packets from 1 pc to another, You have a sliding window that contains how many packets you can have out at one time -> you can send 4 packets at a time, starting with the first one, the receiver receives it and then sends an ACK (Acknowledgment) that it got it. While waiting for ack, you can send the other packets in the sliding window -> allows to send more packets at a time, not 1 by 1. When the ACK gets there, the sliding window moves down and you start sending other packets.
+
+UDP doesnt care about that, instead you send everything and you receive NACK back if something was not received properly. Its a lot more performant, a good packet loss ratio is 1%.
+
+Why use HTTP over TCP? TCP just guarantees that your data is in a certain order and that there's nothing missing. It doesnt really tell you what the data is. http gives you the ability to specify what you are sending, it also gives you a destination within a server. The port and ip address do no guarantee that you're going to the right place.
+
+-> Going to the main address - /dogs - and getting all the videos. The rest are headers
+GET /dogs HTTP/1.1
+Host: youtube.com
+Authorization: Api-Key 69woof
+Accept: video/*
+User-Agent: DogFetcher/1.0
+
+-> This is a body, theryre usually not required -> theyre usually filled in the responses from the server, in the form of the data you are requesting.
+{
+	"breed": "Husky",
+	"limit": 10
+}
+
+In the course we're implementing HTTP 1.1, using the RFC 9110 and RDC 9112 -> http 1, 2 and 3 are semantically equivalent, its just the implementation thats different.
+in http1.1 you send the same headers every time, potentially large cookies, but its redundant
+in http2 and 3 you have HPACK And QPACK, and the qpack takes the same reocurring headers and shrinks them down to a couple of bytes.
+
+the shape of any http message (either a request or a response) is gonna be the same, with some subtle differences.
+1st line is a start-line - GET /dogs HTTP/1.1\r\n -> get request for the destination 'dogs' and the http version.
+Every single line in HTTP1.1 is separated by the \r\n
+The following lines are field lines, 0 or more, theyre headers - form field name: field value\r\n (usually referred to as headers)
+Host: youtube.com
+Authorization: Api-Key 69woof
+Accept: video/*
+User-Agent: DogFetcher/1.0
+\r\n
+-> How http1.1 knows the field lines are finished is cause they are followed by an empty line with \r\n (this is crlf - cr \r lf \n)
+-> You can have multiple headers with the same name but different field value -> they're concatenated with a ", "
+-> Then the json body follows, the header Content-length: 120\r\n can specify that the body is 120 bytes long.
+-> might wanna look at the rfc 9110, but its a very long document, it references the semantics part so it applies for all 3. RFC 9112 is just http1.
+
+The general format of an http message:
+start-line \r\n
+field-line \r\n
+\r\n
+{message-body}
+
+HTTP theory
+HTTP works because plain text *is* binary. Because http uses tcp, if the http request or response is too big to fit into a single TCP packet, it can be broken up into many packets and reconstructed in the correct order on the other side.
+
+Using TCP, instead of a full HTTP request, you might just get the first few characters, like this:
+GE
+So, the parser should be smart enough to know its not done yet, and keep reading untill it gets the full request line:
+GET /pizza HTTP/1.1
+
+as far as HTTP headers go, the RFC refers to them as field-lines, and their "format" is
+field-line = field-name ":" OWS field-value OWS
+-> There can be an unlimited amount of whitespace before and after the field-value, however, when parsing a field-name, there can be no spaces between the colon and the field-name
+-> Host: localhost:42069 - no space between host and :
+-> OWS = 0 or more whitespaces
+
+
+Http is supposed to be stateless, the http servers not necessarily
+
+Every single server has implemented the http protocol which is built on tcp. Technically a lie with http 3 being built on UDP (which implements a form of tcp on top of udp).
+Not all implementations are identical though.
+You could use the http package from go for implementing tcp/udp servers > all of this has been done already
+
+The basic flow is this (the request-response model of http)
+-the client first sends a request containing a status line, field lines, and a body which is optional. They can also include trailers at the end (headers that are computed at the end - i.e. if something massive is being sent through multiple chunks, you would send a trailer X-Checksum: abc123def456 thats dynamically computed. Dynamically computed means that it won't be known untill the end).
+-The request is going to get sent through the wire - probably through many different implementations cause every single destination will have its own implementation, untill it finally gets to the server. Then its gonna parse the status line (GET /news/bootdev-something/ HTTP/1.1), which says "hey, route this here within the server", and then it makes sure everything's parsed - the query parameters and other stuff. You can then go to the database and get some information, or go to a different server, maybe even make a request to chat gpt.
+-When you get the required info, you send back the response message, which is identically shaped as the request message - response line (HTTP/1.1 200 OK), field lines (Content-Type: text/html, Content-length: 8192) and the optional body & optional trailer (for chunked encoding)
+
+In tcp there's no request/response model, its just forming data and being able to have that data on both the client and the server. No response required
+
+Headers that are common enough that should be returned in most responses:
+Content-Length (size of the response body)
+Connection (whether the connection should be kept-alive or closed)
+Content-Type (the mime type of the response body)
+
+other useful headers that are ignored:
+Content-Encoding : is it compressed/encoded? if yes then include this
+Date: useful for caching, time that the message was sent
+Cache-Control: directives for caching mechanisms in both requests and responses.
+
+-> a client should ignore the reason-phrase content because it is not a reliable channel for information. A server has to! return the space that separates the
+status-code from the reason-phrase even when the reason-phrase is absent
+
+i.e. HTPP/1.1 200 (return a space after 200)
+so, the reason-phrases are not required and should be ignored by clients.
+
+
+CURL
+curl -i https://localhost:42069/pizza -> includes all the header information
+curl -I -> just gets the head
+curl -o output.txt link -> outputs everything into the specified file name
+curl -O https://linktoimage.png -> downloads the image
+curl -O --limi-rate 1000B -> downloads the thing with the specified limit
+curl --data "title=Hello&body=Hello WOrld" https://someLink/postMethod -> posts data to the specified rest method
+curl -X PUT -d "title=Hello" https://someLink/putMethod -> the -X PUT lets it know that its supposed to execute a put method, for updates, -d signifies the data
+curl -X DELETE https://someLink/deleteMEthod/id -> delete
+curl -u username:password http://someSite -> this is how you do the request if it requires authentication (if they asked for a secure route)
+curl https://google.com -> it would say it moved to https://www.google.com", if you want to actually follow the provided link, do:
+curl -L https://google.com -> automatically follows to google.com
+
+
+// crlf injection?
