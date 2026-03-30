@@ -7,13 +7,9 @@ import (
 	"http-server/internal/headers"
 )
 
-/*
--> add a writerState field to the writer struct, it ensures that the user of the library uses WriteStatusLine.
-*/
 // allows modification of headers, status code and the body of the response
 type Writer struct {
-	writerState string
-	writer      io.Writer
+	writer io.Writer
 }
 
 // These are fake go enums.
