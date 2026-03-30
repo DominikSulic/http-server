@@ -7,6 +7,15 @@ import (
 	"http-server/internal/headers"
 )
 
+/*
+-> add a writerState field to the writer struct, it ensures that the user of the library uses WriteStatusLine.
+*/
+// allows modification of headers, status code and the body of the response
+type Writer struct {
+	writerState string
+	writer      io.Writer
+}
+
 // These are fake go enums.
 type StatusCode int
 
@@ -16,8 +25,14 @@ const (
 	StatusInternalServerError StatusCode = 500
 )
 
+func NewWriter(writer io.Writer) *Writer {
+	return &Writer{
+		writer: writer,
+	}
+}
+
 // maps the given status code to the correct reason phrase, if its supported. Any other code should just leave the reason phrase blank.
-func WriteStatusLine(writer io.Writer, statusCode StatusCode) error {
+func (writer *Writer) WriteStatusLine(statusCode StatusCode) error {
 	statusLine := "HTTP/1.1 "
 
 	switch statusCode {
@@ -37,7 +52,7 @@ func WriteStatusLine(writer io.Writer, statusCode StatusCode) error {
 		statusLine += string(statusCode)
 	}
 
-	_, err := writer.Write([]byte(statusLine))
+	_, err := writer.writer.Write([]byte(statusLine))
 
 	return err
 }
@@ -54,7 +69,7 @@ func GetDefaultHeaders(contentLength int) *headers.Headers {
 	return headers
 }
 
-func WriteHeaders(writer io.Writer, headers *headers.Headers) error {
+func (writer *Writer) WriteHeaders(headers headers.Headers) error {
 	byteArray := []byte{}
 
 	headers.ForEach(func(key, value string) {
@@ -62,7 +77,13 @@ func WriteHeaders(writer io.Writer, headers *headers.Headers) error {
 	})
 
 	byteArray = fmt.Append(byteArray, "\r\n")
-	_, err := writer.Write(byteArray)
+	_, err := writer.writer.Write(byteArray)
 
 	return err
+}
+
+func (writer *Writer) WriteBody(parsedResponse []byte) (int, error) {
+	numberOfBytes, err := writer.writer.Write(parsedResponse)
+
+	return numberOfBytes, err
 }

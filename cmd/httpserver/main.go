@@ -1,7 +1,7 @@
 package main
 
 import (
-	"io"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -13,6 +13,42 @@ import (
 )
 
 const port = 42069
+
+func respond200() []byte {
+	return []byte(`<html>
+				   	   <head>
+					       <title>200 OK</title>
+					   </head>
+					   <body>
+					       <h1>Success!</h1>
+						   <p>The request provided was good.</p>
+					   </body>
+				   </html>`)
+}
+
+func respond400() []byte {
+	return []byte(`<html>
+				   	   <head>
+					       <title>400 Bad Request</title>
+					   </head>
+					   <body>
+					       <h1>Bad Request</h1>
+						   <p>The request provided was bad.</p>
+					   </body>
+				   </html>`)
+}
+
+func respond500() []byte {
+	return []byte(`<html>
+				   	   <head>
+					       <title>500 Internal Server Error</title>
+					   </head>
+					   <body>
+					       <h1>Internal Server Error</h1>
+						   <p>This one's my bad.</p>
+					   </body>
+				   </html>`)
+}
 
 func main() {
 	server, err := httpserver.Start(port, responseHandler)
@@ -31,15 +67,24 @@ func main() {
 	log.Println("Server gracefully stopped")
 }
 
-func responseHandler(writer io.Writer, request *request.HttpRequest) *httpserver.HandlerError {
+func responseHandler(writer *response.Writer, request *request.HttpRequest) {
+	status := response.StatusOK
+	body := respond200()
+
 	if request.RequestLine.RequestTarget == "/badrequest" {
-		return &httpserver.HandlerError{StatusCode: response.StatusBadRequest, Message: "Bad request\n"}
+		status = response.StatusBadRequest
+		body = respond400()
 	}
 
 	if request.RequestLine.RequestTarget == "/internalerror" {
-		return &httpserver.HandlerError{StatusCode: response.StatusInternalServerError, Message: "Internal error\n"}
+		status = response.StatusInternalServerError
+		body = respond500()
 	}
 
-	writer.Write([]byte("All good\n"))
-	return nil
+	headers := response.GetDefaultHeaders(0)
+	headers.Replace("Content-Type", "text/html")
+	headers.Replace("Content-Length", fmt.Sprintf("%d", len(body)))
+	writer.WriteStatusLine(status)
+	writer.WriteHeaders(*headers)
+	writer.WriteBody(body)
 }

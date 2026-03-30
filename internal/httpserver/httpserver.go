@@ -1,7 +1,6 @@
 package httpserver
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -16,7 +15,7 @@ type HandlerError struct {
 	StatusCode response.StatusCode
 }
 
-type ResponseHandler func(writer io.Writer, request *request.HttpRequest) *HandlerError
+type ResponseHandler func(writer *response.Writer, request *request.HttpRequest)
 
 type Server struct {
 	closed          bool
@@ -62,28 +61,14 @@ func (server *Server) listen(listener net.Listener) {
 
 func (server *Server) handle(connection io.ReadWriteCloser) {
 	defer connection.Close()
-	headers := response.GetDefaultHeaders(0)
+
+	responseWriter := response.NewWriter(connection)
 	httpRequest, err := request.RequestFromReader(connection)
 	if err != nil {
-		response.WriteStatusLine(connection, response.StatusBadRequest)
-		response.WriteHeaders(connection, headers)
+		responseWriter.WriteStatusLine(response.StatusBadRequest)
+		responseWriter.WriteHeaders(*response.GetDefaultHeaders(0))
 		return
 	}
 
-	writer := bytes.NewBuffer([]byte{})
-	handlerError := server.responseHandler(writer, httpRequest)
-
-	var body []byte = nil
-	var status response.StatusCode = response.StatusOK
-	if handlerError != nil {
-		status = handlerError.StatusCode
-		body = []byte(handlerError.Message)
-	} else {
-		body = writer.Bytes()
-	}
-
-	headers.Replace("Content-Length", fmt.Sprintf("%d", len(body)))
-	response.WriteStatusLine(connection, status)
-	response.WriteHeaders(connection, headers)
-	connection.Write(body)
+	server.responseHandler(responseWriter, httpRequest)
 }
