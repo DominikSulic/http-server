@@ -83,3 +83,25 @@ func (writer *Writer) WriteBody(parsedResponse []byte) (int, error) {
 
 	return numberOfBytes, err
 }
+
+// chunk sizes should be the sizes in bytes of the data, and in hexadecimal format.
+func (writer *Writer) WriteChunkedBody(chunk []byte) (int, error) {
+	numberOfBytes, err := writer.writer.Write(chunk)
+	writer.writer.Write([]byte("\r\n"))
+
+	return numberOfBytes, err
+}
+
+func (writer *Writer) WriteChunkedBodyDone() (int, error) {
+	numberOfBytes, err := writer.writer.Write([]byte("0\r\n\r\n"))
+	return numberOfBytes, err
+}
+
+func (writer *Writer) WriteTrailers(headers headers.Headers) error {
+	err := writer.WriteHeaders(headers)
+	if err != nil {
+		return err
+	}
+	_, err = writer.WriteBody([]byte("\r\n"))
+	return err
+}

@@ -45,6 +45,10 @@ func (headers *Headers) Set(name string, value string) {
 	}
 }
 
+func (headers *Headers) Remove(name string) {
+	delete(headers.headers, strings.ToLower(name)) // If there's no key, nothing happens.
+}
+
 // done this way not to expose the internals of the module to the outside
 func (headers *Headers) ForEach(cb func(key, value string)) {
 	for key, value := range headers.headers {

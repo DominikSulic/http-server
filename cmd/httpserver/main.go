@@ -1,12 +1,16 @@
 package main
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
+	"http-server/internal/headers"
 	"http-server/internal/httpserver"
 	"http-server/internal/request"
 	"http-server/internal/response"
@@ -67,23 +71,95 @@ func main() {
 	log.Println("Server gracefully stopped")
 }
 
+// echo -e "GET /httpbin/stream/100 HTTP/1.1\r\nHost: localhost:42069\r\nConnection: close\r\n\r\n" | nc localhost 42069
 func responseHandler(writer *response.Writer, request *request.HttpRequest) {
-	status := response.StatusOK
-	body := respond200()
+	requestTarget := request.RequestLine.RequestTarget
 
-	if request.RequestLine.RequestTarget == "/badrequest" {
-		status = response.StatusBadRequest
-		body = respond400()
+	if requestTarget == "/badrequest" {
+		handleBadRequest(writer, request)
+	} else if requestTarget == "/internalerror" {
+		handleInternalError(writer, request)
+	} else if strings.HasPrefix(requestTarget, "/httpbin/") {
+		handleHttpBinRequestWithChunkedEncoding(writer, request)
 	}
+}
 
-	if request.RequestLine.RequestTarget == "/internalerror" {
-		status = response.StatusInternalServerError
-		body = respond500()
-	}
-
+func handleBadRequest(writer *response.Writer, request *request.HttpRequest) {
 	headers := response.GetDefaultHeaders(0)
 	headers.Replace("Content-Type", "text/html")
+	status := response.StatusBadRequest
+	body := respond400()
 	headers.Replace("Content-Length", fmt.Sprintf("%d", len(body)))
+
+	writeStatusHeadersAndBody(writer, status, headers, body)
+}
+
+func handleInternalError(writer *response.Writer, request *request.HttpRequest) {
+	headers := response.GetDefaultHeaders(0)
+	headers.Replace("Content-Type", "text/html")
+	status := response.StatusInternalServerError
+	body := respond500()
+	headers.Replace("Content-Length", fmt.Sprintf("%d", len(body)))
+
+	writeStatusHeadersAndBody(writer, status, headers, body)
+}
+
+/*
+run the server and debug your code with curl --raw
+*/
+func handleHttpBinRequestWithChunkedEncoding(writer *response.Writer, request *request.HttpRequest) {
+	httpbinResponse, err := http.Get("https://httpbin.org/" + strings.TrimPrefix(request.RequestLine.RequestTarget, "/httpbin/"))
+	httpHeaders := response.GetDefaultHeaders(0)
+
+	if err != nil {
+		handleInternalError(writer, request)
+		return
+	}
+
+	httpHeaders.Remove("Content-Length")
+	httpHeaders.Set("Transfer-Encoding", "chunked")
+	httpHeaders.Set("Trailer", "X-Content-SHA256")
+	httpHeaders.Set("Trailer", "X-Content-Length")
+	httpHeaders.Replace("Content-Type", "text/plain")
+	// you can use 32 byte chunks for testing, instead of 1024.
+	chunkSize := 1024
+	buffer := make([]byte, chunkSize)
+
+	responseBody := []byte{}
+	for {
+		numberOfBytesRead, err := httpbinResponse.Body.Read(buffer)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		writer.WriteChunkedBody([]byte(fmt.Sprintf("%x\r\n", numberOfBytesRead))) // hex value, without the first 0x part, outputs 20 instead of 32
+		fmt.Printf("Number of bytes read: %d\n", numberOfBytesRead)
+
+		writer.WriteChunkedBody(buffer[:numberOfBytesRead])
+		responseBody = append(responseBody, buffer[:numberOfBytesRead]...)
+
+		if numberOfBytesRead < chunkSize {
+			writer.WriteChunkedBodyDone()
+			break
+		}
+	}
+
+	sha256Hash := sha256.Sum256(responseBody)
+	trailers := headers.NewHeaders()
+	trailers.Set("X-Content-SHA256", toString(sha256Hash[:]))
+	trailers.Set("X-Content-Length", fmt.Sprintf("%d", len(responseBody)))
+	writer.WriteTrailers(*trailers)
+}
+
+func toString(bytes []byte) string {
+	output := ""
+	for _, b := range bytes {
+		output += fmt.Sprintf("%02x", b)
+	}
+	return output
+}
+
+func writeStatusHeadersAndBody(writer *response.Writer, status response.StatusCode, headers *headers.Headers, body []byte) {
 	writer.WriteStatusLine(status)
 	writer.WriteHeaders(*headers)
 	writer.WriteBody(body)

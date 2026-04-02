@@ -89,6 +89,51 @@ status-code from the reason-phrase even when the reason-phrase is absent
 i.e. HTPP/1.1 200 (return a space after 200)
 so, the reason-phrases are not required and should be ignored by clients.
 
+Chunked encoding
+If a client sends a request to download a file that's i.e. 10GB, you can't just load everything into memory, do the checksums and send it out easily. There are things like
+content-length that are problematic here. Also, if you don't even know how long the file is, what if you're receiving it from another server or some protocol that doesn't even
+specify the length? Requires a way to send out data in such a way that the length doesn't have to be specified upfront -> this is chunked encoding.
+
+It's a somewhat trivial form of encoding where each http body contains how many bytes are in the body, and then the data bytes.
+i.e.
+...
+Transfer-Encoding: chunked
+
+04\r\n // -> this is a hexadecimal number, not decimal
+\x76 \x69 \x62 \x65\r\n
+04\r\n
+\x76 \x69 \x62 \x65\r\n
+04\r\n
+\x76 \x69 \x62 \x65\r\n
+0\r\n
+\r\n
+So then you just reassamble each of those chunks. The 0 length one appears at the end -> contains an empty data field, its the last, enclosing chunk of a chunked encoding sequence. You simply keep receiving and storing data in an appropriate manner, dont have to know the length.
+
+Another thing about chunked encoding is that you can specify trailers at the end. Trailers allow for extra header fields at the end. They appear at the end but they are all part
+of headers. Trailers are used to send information about the message body that can't be known until the message body is fully sent, i.e. the hash of the message body.
+i.e.
+at the bottom of the http headers theres another header:
+...
+Transfer-Encoding: chunked
+Trailer: Expires, Checksum, X-Sigil, Forge-Time
+
+04\r\n
+\x76 \x69 \x62 \x65\r\n
+04\r\n
+\x76 \x69 \x62 \x65\r\n
+0\r\n
+\r\n
+Expires: Wed, 1st April 2025 12:00:00 GMT\r\n
+Checksum: 1234567689\r\n
+X-Sigil: Keeper-of-Bytes\r\n
+Forge-Time: Wed, 1st April 2025 09:00:00 GMT\r\n
+
+Headers are asynchronous and the above section is the reason why
+This httpserver supports chunked responses because occasionally the server can act as a proxy for another server. Any requests to the /httpbin endpoint will be proxied
+to the httpbin.org: an online tool for testing http stuff.
+i.e. GET localhost:42069/httpbin/stream/100 will trigger a handler on this server that sends a request to https://httpbin.org/stream/100 and then
+forwards the response back to the client, chunk by chunk.
+
 
 CURL
 curl -i https://localhost:42069/pizza -> includes all the header information
