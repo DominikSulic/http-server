@@ -81,6 +81,8 @@ func responseHandler(writer *response.Writer, request *request.HttpRequest) {
 		handleInternalError(writer, request)
 	} else if strings.HasPrefix(requestTarget, "/httpbin/") {
 		handleHttpBinRequestWithChunkedEncoding(writer, request)
+	} else if requestTarget == "/video" {
+		handleVideoRequest(writer, request)
 	}
 }
 
@@ -163,4 +165,20 @@ func writeStatusHeadersAndBody(writer *response.Writer, status response.StatusCo
 	writer.WriteStatusLine(status)
 	writer.WriteHeaders(*headers)
 	writer.WriteBody(body)
+}
+
+func handleVideoRequest(writer *response.Writer, request *request.HttpRequest) {
+	headers := response.GetDefaultHeaders(0)
+	headers.Replace("Content-Type", "video/mp4")
+
+	file, err := os.ReadFile("assets/test.mp4")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	status := response.StatusOK
+	body := file
+	headers.Replace("Content-Length", fmt.Sprintf("%d", len(file)))
+
+	writeStatusHeadersAndBody(writer, status, headers, body)
 }

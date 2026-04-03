@@ -135,6 +135,18 @@ i.e. GET localhost:42069/httpbin/stream/100 will trigger a handler on this serve
 forwards the response back to the client, chunk by chunk.
 
 
+HTTP 2
+-> It's a binary protocol rather than text-based. This makes it more efficient and less error-prone, but also requires more steps to debug, usually.
+-> Uses multiplexing, this allows multiple requests and responses to be sent over a single connection at the same time ->reduces latency, improves performance
+-> Uses header compression to save on header bandwitdth (HPACK)
+-> Allows for server push, which lets the server send resources to the client before they are requested.
+
+HTTP 3
+-> Built on QUIC instead of TCP, it's a transport layer protocol that runs over UDP, which allows faster connection establishment and improved performance.
+-> Uses encryption at the HTTP protocol level (HTTP1.1 is unencrypted by default, it requires HTTPS to be secure)
+
+
+
 CURL
 curl -i https://localhost:42069/pizza -> includes all the header information
 curl -I -> just gets the head
